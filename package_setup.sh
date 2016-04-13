@@ -27,3 +27,10 @@ cd $CATKIN_WS/src/oculus/oculus_driver/LibOVR
 make # might return errors but they can likely be ignored
 cd $CATKIN_WS
 catkin_make
+
+
+# # UNCOMMENT to install gazebo simulator package
+# cd $CATKIN_WS/src
+# git clone https://github.com/dougvk/tum_simulator.git
+# cd ..
+# catkin_make
