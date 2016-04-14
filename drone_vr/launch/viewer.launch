@@ -1,0 +1,38 @@
+<launch>
+    <!--Debugging purposes , enter the next line into the node tag-->
+    <!--launch-prefix="xterm -e gdb -args"-->
+	<node pkg="oculus_driver"
+        type="oculus_node"
+        name="oculus_node"
+    >
+	</node>
+    
+	<node pkg="oculus_viewer"
+        type="image_distort_viewer"
+        name="image_distort_viewer"
+    >
+		<param name="image_transport" value="compressed"/>
+		<!-- adjust these params for your robot -->
+		<param name="display_offset_y" value="-40"/>
+		<param name="display_offset_x" value="70"/>
+	</node>	
+	
+
+	<arg name="droneip" default="192.168.1.1" />
+  	<node name="ardrone_driver" pkg="ardrone_autonomy" 		type="ardrone_driver" output="screen" args="-ip $(arg droneip)">
+    	<param name="navdata_demo" value="False" />
+    	<param name="realtime_navdata" value="True" />
+    	<param name="realtime_video" value="True" />
+    	<param name="looprate" value="30" />
+  	</node>
+
+	<node name="relay_left" pkg="topic_tools" type="relay" args="/ardrone/front/image_raw/compressed /camera/left/image_raw/compressed"/>
+	
+	<node name="relay_right" pkg="topic_tools" type="relay" args="/ardrone/front/image_raw/compressed /camera/right/image_raw/compressed"/>
+
+	<!--<node name="drone_teleop_node" pkg="drone_vr" type="drone_teleop_node"/>-->
+
+	<node name="joy_node" pkg="joy" type="joy_node" />
+
+</launch>
+
