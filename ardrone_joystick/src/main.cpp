@@ -15,13 +15,18 @@
 #include "std_srvs/Empty.h"
 #include "ardrone_autonomy/FlightAnim.h"
 
+#include <geometry_msgs/Quaternion.h>
+#include <tf/transform_datatypes.h>
+
 const int PUBLISH_FREQ = 50;
 
 using namespace std;
 
 struct TeleopArDrone
 {
+	string controller_type;
 	ros::Subscriber joy_sub;
+	ros::Subscriber oculus_sub;
 	ros::Publisher pub_takeoff, pub_land, pub_toggle_state, pub_vel;
 
 	bool got_first_joy_msg;
@@ -30,6 +35,11 @@ struct TeleopArDrone
 	bool toggle_pressed_in_last_msg;
 	bool cam_toggle_pressed_in_last_msg;
 	bool anim_toggle_pressed_in_last_msg;
+
+	bool dead_man_pressed;
+	bool emergency_toggle_pressed;
+	bool cam_toggle_pressed;
+	bool anim_toggle_pressed;
 
 	std_srvs::Empty srv_empty;
 	ardrone_autonomy::FlightAnim srv_flight;
@@ -44,32 +54,50 @@ struct TeleopArDrone
 		if (!got_first_joy_msg){
 			ROS_INFO("Found joystick with %zu buttons and %zu axes", joy_msg->buttons.size(), joy_msg->axes.size());
 			
-			// lock button mapping for Logitech F310 gamepad
-			if (joy_msg->buttons.size() != 11 || joy_msg->axes.size() != 8){
-				ROS_FATAL("This joystick does not look like a PS3-Joystick");
+			if (joy_msg->buttons.size() == 11 || joy_msg->axes.size() == 8) {
+				controller_type = "F310";
 			}
-
+			else if (joy_msg->buttons.size() == 19 || joy_msg->axes.size() == 27) {
+				controller_type = "PS3";
+			}
+			else {
+				ROS_FATAL("This joystick button map is not recognized");
+			}
+			ROS_INFO("Controller Type: %s", controller_type.c_str());
 			got_first_joy_msg = true;
 		}
-		// mapping from joystick to velocity
-		float scale = 1;
-
-		twist.linear.x = scale*joy_msg->axes[1];
-		twist.linear.y = scale*joy_msg->axes[0];
-		twist.linear.z = scale*joy_msg->axes[4];
-		twist.angular.z = scale*joy_msg->axes[3];
-
-		// button 10 (L1): dead man switch
-		bool dead_man_pressed = joy_msg->buttons.at(4);
-
-		// button 11 (R1): switch emergeny state 
-		bool emergency_toggle_pressed = joy_msg->buttons.at(5);
-
-		// button 0 (select): switch camera mode (front/bottom)
-		bool cam_toggle_pressed = joy_msg->buttons.at(6);
-
-		bool anim_toggle_pressed = joy_msg->buttons.at(0);
-
+		if (controller_type == "F310") {
+			// mapping from joystick to velocity
+			float scale = 1;
+			twist.linear.x = scale*joy_msg->axes[1];
+			twist.linear.y = scale*joy_msg->axes[0];
+			twist.linear.z = scale*joy_msg->axes[4];
+			// twist.angular.z = scale*joy_msg->axes[3];
+			// (L1): dead man switch
+			dead_man_pressed = joy_msg->buttons.at(4);
+			// (R1): switch emergeny state 
+			emergency_toggle_pressed = joy_msg->buttons.at(5);
+			// (select): switch camera mode (front/bottom)
+			cam_toggle_pressed = joy_msg->buttons.at(6);
+			// (X button (in PS3 layout)): backflip
+			anim_toggle_pressed = joy_msg->buttons.at(0);
+		}
+		else if (controller_type == "PS3") {
+			// mapping from joystick to velocity
+			float scale = 1;
+			twist.linear.x = scale*joy_msg->axes[1];
+			twist.linear.y = scale*joy_msg->axes[0];
+			twist.linear.z = scale*joy_msg->axes[3];
+			// twist.angular.z = scale*joy_msg->axes[2];
+			// (L1): dead man switch
+			dead_man_pressed = joy_msg->buttons.at(10);
+			// (R1): switch emergeny state 
+			emergency_toggle_pressed = joy_msg->buttons.at(11);
+			// (select): switch camera mode (front/bottom)
+			cam_toggle_pressed = joy_msg->buttons.at(0);
+			// (X button (in PS3 layout)): backflip
+			anim_toggle_pressed = joy_msg->buttons.at(14);
+		}
 
 		if (!is_flying && dead_man_pressed){
 			ROS_INFO("L1 was pressed, Taking off!");
@@ -106,6 +134,14 @@ struct TeleopArDrone
 		anim_toggle_pressed_in_last_msg = anim_toggle_pressed;
 	}
 
+	void oculusCallback(const geometry_msgs::Quaternion::ConstPtr& oculus) {
+		tf::Quaternion q(oculus->x, oculus->y, oculus->z, oculus->w);
+		tf::Matrix3x3 m(q);
+		double roll, pitch, yaw;
+		m.getRPY(roll, pitch, yaw);
+		twist.angular.z = 3.5 * yaw;
+	}
+
 
 	TeleopArDrone(){
 
@@ -116,6 +152,7 @@ struct TeleopArDrone
 		got_first_joy_msg = false;
 
 		joy_sub = nh_.subscribe("/joy", 1,&TeleopArDrone::joyCb, this);
+		oculus_sub = nh_.subscribe("oculus/orientation", 1, &TeleopArDrone::oculusCallback, this);
 		toggle_pressed_in_last_msg = cam_toggle_pressed_in_last_msg = false;
 
 		pub_takeoff       = nh_.advertise<std_msgs::Empty>("/ardrone/takeoff",1);
