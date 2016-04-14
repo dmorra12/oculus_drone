@@ -139,7 +139,7 @@ struct TeleopArDrone
 		tf::Matrix3x3 m(q);
 		double roll, pitch, yaw;
 		m.getRPY(roll, pitch, yaw);
-		twist.angular.z = 3.5 * yaw;
+		twist.angular.z = -3.5 * yaw;
 	}
 
 
