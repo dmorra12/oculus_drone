@@ -18,12 +18,19 @@
 #include <geometry_msgs/Quaternion.h>
 #include <tf/transform_datatypes.h>
 
+#include <stdlib.h>
+
 const int PUBLISH_FREQ = 50;
 
 using namespace std;
 
 struct TeleopArDrone
 {
+	double OCULUS_YAW_OFFSET;
+	double OCULUS_ROLL_OFFSET;
+	double OCULUS_PITCH_OFFSET;
+
+	bool oculusCalib;
 	string controller_type;
 	ros::Subscriber joy_sub;
 	ros::Subscriber oculus_sub;
@@ -71,7 +78,7 @@ struct TeleopArDrone
 			float scale = 1;
 			twist.linear.x = scale*joy_msg->axes[1];
 			twist.linear.y = scale*joy_msg->axes[0];
-			twist.linear.z = scale*joy_msg->axes[4];
+			// twist.linear.z = scale*joy_msg->axes[4];
 			// twist.angular.z = scale*joy_msg->axes[3];
 			// (L1): dead man switch
 			dead_man_pressed = joy_msg->buttons.at(4);
@@ -87,7 +94,7 @@ struct TeleopArDrone
 			float scale = 1;
 			twist.linear.x = scale*joy_msg->axes[1];
 			twist.linear.y = scale*joy_msg->axes[0];
-			twist.linear.z = scale*joy_msg->axes[3];
+			// twist.linear.z = scale*joy_msg->axes[3];
 			// twist.angular.z = scale*joy_msg->axes[2];
 			// (L1): dead man switch
 			dead_man_pressed = joy_msg->buttons.at(10);
@@ -129,17 +136,40 @@ struct TeleopArDrone
 			ROS_INFO("Executing Backflip");
 			srv_flight.request.type = 17;
 			srv_flight.request.duration = 0;
-			if (!srv_cl_anim.call(srv_flight))  ROS_INFO("Failed to send backflip");
+			system("rosservice call /ardrone/setflightanimation 17 0");
+			// if (!srv_cl_anim.call(srv_flight))  ROS_INFO("Failed to send backflip");
 		}
 		anim_toggle_pressed_in_last_msg = anim_toggle_pressed;
 	}
 
 	void oculusCallback(const geometry_msgs::Quaternion::ConstPtr& oculus) {
+		double scale = 1.0;
+		double deadzone = 0.25;
 		tf::Quaternion q(oculus->x, oculus->y, oculus->z, oculus->w);
-		tf::Matrix3x3 m(q);
 		double roll, pitch, yaw;
-		m.getRPY(roll, pitch, yaw);
-		twist.angular.z = -3.5 * yaw;
+		// tf::Matrix3x3(q).getRPY(roll, pitch, yaw);
+		tf::Matrix3x3(q).getRPY(pitch, yaw, roll); // roll, yaw negative
+		roll = -roll;
+		if (!oculusCalib) {
+			OCULUS_ROLL_OFFSET = roll;
+			OCULUS_PITCH_OFFSET = pitch;
+			OCULUS_YAW_OFFSET = yaw;
+			oculusCalib = true;
+		}
+		roll -= OCULUS_ROLL_OFFSET;
+		pitch -= OCULUS_PITCH_OFFSET;
+		yaw -= OCULUS_YAW_OFFSET;
+		pitch *= scale;
+		yaw *= scale;
+		if (abs(yaw) < deadzone) {
+			yaw = 0;
+		}
+		if (abs(pitch) < deadzone) {
+			pitch = 0;
+		}
+		twist.angular.z = yaw;
+		twist.linear.z = pitch;
+		// ROS_INFO("\nRoll = %f\nPitch = %f\nYaw = %f\n----------", scale*roll, scale*pitch, scale*yaw);
 	}
 
 
@@ -150,6 +180,7 @@ struct TeleopArDrone
 
 		is_flying = false;
 		got_first_joy_msg = false;
+		oculusCalib = false;
 
 		joy_sub = nh_.subscribe("/joy", 1,&TeleopArDrone::joyCb, this);
 		oculus_sub = nh_.subscribe("oculus/orientation", 1, &TeleopArDrone::oculusCallback, this);
@@ -160,7 +191,7 @@ struct TeleopArDrone
 		pub_toggle_state  = nh_.advertise<std_msgs::Empty>("/ardrone/reset",1);
 		pub_vel           = nh_.advertise<geometry_msgs::Twist>("/cmd_vel",1);
 		srv_cl_cam        = nh_.serviceClient<std_srvs::Empty>("/ardrone/togglecam",1);
-		srv_cl_anim		  = nh_.serviceClient<ardrone_autonomy::FlightAnim>("/ardrone/setflightanimation",1);
+		// srv_cl_anim		  = nh_.serviceClient<ardrone_autonomy::FlightAnim>("/ardrone/setflightanimation",1);
 	}
 
 	void send_cmd_vel(){
