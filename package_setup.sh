@@ -22,7 +22,7 @@ cd OculusSDK
 ./ConfigurePermissionsAndPackages.sh
 make
 
-cp -a LibOVR/ ~/catkin_ws/src/oculus/oculus_driver/
+cp -a LibOVR/ $CATKIN_WS/src/oculus/oculus_driver/
 cd $CATKIN_WS/src/oculus/oculus_driver/LibOVR
 make # might return errors but they can likely be ignored
 cd $CATKIN_WS
@@ -34,3 +34,10 @@ catkin_make
 # git clone https://github.com/dougvk/tum_simulator.git
 # cd ..
 # catkin_make
+
+# Myo
+sudo apt-get install -y ros-indigo-rosserial-server
+cd $CATKIN_WS/src
+git clone https://github.com/roboTJ101/ros_myo.git
+cd ..
+catkin_make

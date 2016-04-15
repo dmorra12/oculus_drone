@@ -29,9 +29,9 @@
 
 
 
-	<node name="relay_left" pkg="topic_tools" type="relay" args="/ardrone/front/image_raw/compressed /camera/left/image_raw/compressed"/>
+	<node name="relay_left" pkg="topic_tools" type="relay" args="/ardrone/image_raw/compressed /camera/left/image_raw/compressed"/>
 	
-	<node name="relay_right" pkg="topic_tools" type="relay" args="/ardrone/front/image_raw/compressed /camera/right/image_raw/compressed"/>
+	<node name="relay_right" pkg="topic_tools" type="relay" args="/ardrone/image_raw/compressed /camera/right/image_raw/compressed"/>
 
 	<!-- Teleop Node from ardrone_joystick package -->
     <node pkg="joy" type="joy_node" name="joy_node" output="screen">
