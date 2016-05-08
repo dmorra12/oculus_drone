@@ -37,12 +37,12 @@
     <node pkg="joy" type="joy_node" name="joy_node" output="screen">
     	<param name="autorepeat_rate" value="10" />
     </node>
-    <node pkg="ardrone_joystick" type="ardrone_joystick_node" name="ardrone_joystick" output="screen">
+    <node pkg="ardrone_joystick" type="ardrone_joystick_only_node" name="ardrone_joystick" output="screen">
     </node>
 
     <!-- AR TRACK ALVAR -->
-    <arg name="marker_size" default="7.0" />
-    <arg name="max_new_marker_error" default="0.08" />
+    <arg name="marker_size" default="50" />
+    <arg name="max_new_marker_error" default="0.2" />
     <arg name="max_track_error" default="0.2" />
     <arg name="cam_image_topic" default="/ardrone/image_raw" />
     <arg name="cam_info_topic" default="/ardrone/camera_info" />    

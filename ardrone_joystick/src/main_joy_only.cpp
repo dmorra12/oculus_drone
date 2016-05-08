@@ -18,12 +18,6 @@
 #include <geometry_msgs/Quaternion.h>
 #include <tf/transform_datatypes.h>
 
-// autopilot
-#include <tum_ardrone/filter_state.h>
-#include <vector>
-#include <queue>
-#include <std_msgs/String.h>
-
 #include <stdlib.h>
 
 const int PUBLISH_FREQ = 50;
@@ -41,12 +35,6 @@ struct TeleopArDrone
 	ros::Subscriber joy_sub;
 	ros::Subscriber oculus_sub;
 	ros::Publisher pub_takeoff, pub_land, pub_toggle_state, pub_vel;
-	
-	// autopilot
-	ros::Subscriber pos_sub;
-	ros::Publisher pub_pos;
-	queue<tum_ardrone::filter_stateConstPtr> nav_queue;
-	bool waypoint_set;
 
 	bool got_first_joy_msg;
 
@@ -90,8 +78,8 @@ struct TeleopArDrone
 			float scale = 1;
 			twist.linear.x = scale*joy_msg->axes[1];
 			twist.linear.y = scale*joy_msg->axes[0];
-			// twist.linear.z = scale*joy_msg->axes[4];
-			// twist.angular.z = scale*joy_msg->axes[3];
+			twist.linear.z = scale*joy_msg->axes[4];
+			twist.angular.z = scale*joy_msg->axes[3];
 			// (L1): dead man switch
 			dead_man_pressed = joy_msg->buttons.at(4);
 			// (R1): switch emergeny state 
@@ -106,8 +94,8 @@ struct TeleopArDrone
 			float scale = 1;
 			twist.linear.x = scale*joy_msg->axes[1];
 			twist.linear.y = scale*joy_msg->axes[0];
-			// twist.linear.z = scale*joy_msg->axes[3];
-			// twist.angular.z = scale*joy_msg->axes[2];
+			twist.linear.z = scale*joy_msg->axes[3];
+			twist.angular.z = scale*joy_msg->axes[2];
 			// (L1): dead man switch
 			dead_man_pressed = joy_msg->buttons.at(10);
 			// (R1): switch emergeny state 
@@ -155,65 +143,35 @@ struct TeleopArDrone
 		anim_toggle_pressed_in_last_msg = anim_toggle_pressed;
 	}
 
-	void oculusCallback(const geometry_msgs::Quaternion::ConstPtr& oculus) {
-		double scale = 1.0;
-		double deadzone = 0.25;
-		tf::Quaternion q(oculus->x, oculus->y, oculus->z, oculus->w);
-		double roll, pitch, yaw;
-		// tf::Matrix3x3(q).getRPY(roll, pitch, yaw);
-		tf::Matrix3x3(q).getRPY(pitch, yaw, roll); // roll, yaw negative
-		roll = -roll;
-		if (!oculusCalib) {
-			OCULUS_ROLL_OFFSET = roll;
-			OCULUS_PITCH_OFFSET = pitch;
-			OCULUS_YAW_OFFSET = yaw;
-			oculusCalib = true;
-		}
-		roll -= OCULUS_ROLL_OFFSET;
-		pitch -= OCULUS_PITCH_OFFSET;
-		yaw -= OCULUS_YAW_OFFSET;
-		pitch *= scale;
-		yaw *= scale;
-		if (abs(yaw) < deadzone) {
-			yaw = 0;
-		}
-		if (abs(pitch) < deadzone) {
-			pitch = 0;
-		}
-		twist.angular.z = yaw;
-		twist.linear.z = pitch;
-		// ROS_INFO("\nRoll = %f\nPitch = %f\nYaw = %f\n----------", scale*roll, scale*pitch, scale*yaw);
-	}
-
-	// AUTOPILOT
-	void posCb(const tum_ardrone::filter_stateConstPtr est) {
-		if (!nav_queue.empty()) {
-			if (!waypoint_set) {
-				setWayPoint(nav_queue.front());
-				waypoint_set = true;
-			}
-			if (pos_eq(est,nav_queue.front())) {
-				nav_queue.pop();
-				waypoint_set = false;
-			}
-		}
-		else {
-			land();
-			ros::shutdown();
-		}
-	}
-	void setWayPoint(tum_ardrone::filter_stateConstPtr p) {
-		std::ostringstream ss;
-		ss << "c goto " << p->x << " " << p->y << " " << p->z << " " << p->yaw;
-		std_msgs::String str;
-		str.data = ss.str();
-		pub_pos.publish(str);
-	}
-	bool pos_eq(tum_ardrone::filter_state::ConstPtr p1, tum_ardrone::filter_state::ConstPtr p2) {
-		double dist = sqrt(pow(p1->x - p2->x,2) + pow(p1->y - p2->y,2) + pow(p1->z - p2->z,2) + pow(p1->yaw - p2->yaw,2));
-		// ROS_INFO("***EUCLIDIAN DISTANCE = %f", euclid);
-		return dist < 0.25;
-	}
+	// void oculusCallback(const geometry_msgs::Quaternion::ConstPtr& oculus) {
+	// 	double scale = 1.0;
+	// 	double deadzone = 0.25;
+	// 	tf::Quaternion q(oculus->x, oculus->y, oculus->z, oculus->w);
+	// 	double roll, pitch, yaw;
+	// 	// tf::Matrix3x3(q).getRPY(roll, pitch, yaw);
+	// 	tf::Matrix3x3(q).getRPY(pitch, yaw, roll); // roll, yaw negative
+	// 	roll = -roll;
+	// 	if (!oculusCalib) {
+	// 		OCULUS_ROLL_OFFSET = roll;
+	// 		OCULUS_PITCH_OFFSET = pitch;
+	// 		OCULUS_YAW_OFFSET = yaw;
+	// 		oculusCalib = true;
+	// 	}
+	// 	roll -= OCULUS_ROLL_OFFSET;
+	// 	pitch -= OCULUS_PITCH_OFFSET;
+	// 	yaw -= OCULUS_YAW_OFFSET;
+	// 	pitch *= scale;
+	// 	yaw *= scale;
+	// 	if (abs(yaw) < deadzone) {
+	// 		yaw = 0;
+	// 	}
+	// 	if (abs(pitch) < deadzone) {
+	// 		pitch = 0;
+	// 	}
+	// 	twist.angular.z = yaw;
+	// 	twist.linear.z = pitch;
+	// 	// ROS_INFO("\nRoll = %f\nPitch = %f\nYaw = %f\n----------", scale*roll, scale*pitch, scale*yaw);
+	// }
 
 
 	TeleopArDrone(){
@@ -226,7 +184,7 @@ struct TeleopArDrone
 		oculusCalib = false;
 
 		joy_sub = nh_.subscribe("/joy", 1,&TeleopArDrone::joyCb, this);
-		oculus_sub = nh_.subscribe("oculus/orientation", 1, &TeleopArDrone::oculusCallback, this);
+		// oculus_sub = nh_.subscribe("oculus/orientation", 1, &TeleopArDrone::oculusCallback, this);
 		toggle_pressed_in_last_msg = cam_toggle_pressed_in_last_msg = false;
 
 		pub_takeoff       = nh_.advertise<std_msgs::Empty>("/ardrone/takeoff",1);
@@ -234,29 +192,11 @@ struct TeleopArDrone
 		pub_toggle_state  = nh_.advertise<std_msgs::Empty>("/ardrone/reset",1);
 		pub_vel           = nh_.advertise<geometry_msgs::Twist>("/cmd_vel",1);
 		srv_cl_cam        = nh_.serviceClient<std_srvs::Empty>("/ardrone/togglecam",1);
-
-
-		// autopilot
-		pos_sub = nh_.subscribe("/ardrone/predictedPose", 1, &TeleopArDrone::posCb, this);
-		pub_pos			  = nh_.advertise<std_msgs::String>("/tum_ardrone/com",1);
 		// srv_cl_anim		  = nh_.serviceClient<ardrone_autonomy::FlightAnim>("/ardrone/setflightanimation",1);
 	}
 
 	void send_cmd_vel(){
     	pub_vel.publish(twist);
-  	}
-  	void takeoff() {
-  		pub_takeoff.publish(std_msgs::Empty());
-  	}
-  	void land() {
-  		pub_land.publish(std_msgs::Empty());
-  	}
-  	void startAutoPilot() {
-	  	std_msgs::String str;
-	  	str.data = "c start";
-	  	pub_pos.publish(str);
-		str.data = "u l Autopilot: Start Controlling";
-		pub_pos.publish(str);
   	}
 
 
@@ -274,8 +214,6 @@ int main(int argc, char **argv)
 
   TeleopArDrone teleop;
   ros::Rate pub_rate(PUBLISH_FREQ);
-
-  teleop.startAutoPilot();
 
   while (teleop.nh_.ok())
   {

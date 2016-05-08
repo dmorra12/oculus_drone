@@ -131,6 +131,7 @@ include_directories(
 
 ## Declare a C++ executable
 add_executable(ardrone_joystick_node src/main.cpp)
+add_executable(ardrone_joystick_only_node src/main_joy_only.cpp)
 
 ## Add cmake target dependencies of the executable
 ## same as for the library above
@@ -138,6 +139,9 @@ add_dependencies(ardrone_joystick_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${cat
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(ardrone_joystick_node
+  ${catkin_LIBRARIES}
+)
+target_link_libraries(ardrone_joystick_only_node
   ${catkin_LIBRARIES}
 )
 
