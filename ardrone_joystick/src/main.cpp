@@ -15,6 +15,12 @@
 #include "std_srvs/Empty.h"
 #include "ardrone_autonomy/FlightAnim.h"
 
+// myo imu
+#include <sensor_msgs/Imu.h>
+#include <geometry_msgs/Vector3.h>
+#include <ros_myo/EmgArray.h>
+
+
 #include <geometry_msgs/Quaternion.h>
 #include <tf/transform_datatypes.h>
 
@@ -40,13 +46,16 @@ struct TeleopArDrone
 	string controller_type;
 	ros::Subscriber joy_sub;
 	ros::Subscriber oculus_sub;
-	ros::Publisher pub_takeoff, pub_land, pub_toggle_state, pub_vel;
+	ros::Subscriber myo_imu_sub;
+	ros::Subscriber myo_emg_sub;
+	ros::Publisher pub_takeoff, pub_land, pub_toggle_state, pub_vel, myo_imu_pub;
 	
 	// autopilot
 	ros::Subscriber pos_sub;
 	ros::Publisher pub_pos;
 	queue<tum_ardrone::filter_stateConstPtr> nav_queue;
 	bool waypoint_set;
+	bool auto_pilot_on;
 
 	bool got_first_joy_msg;
 
@@ -70,6 +79,7 @@ struct TeleopArDrone
 	ros::ServiceClient srv_cl_anim;
 
 	void joyCb(const sensor_msgs::JoyConstPtr joy_msg){
+		if (auto_pilot_on) {return;}
 		if (!got_first_joy_msg){
 			ROS_INFO("Found joystick with %zu buttons and %zu axes", joy_msg->buttons.size(), joy_msg->axes.size());
 			
@@ -181,23 +191,82 @@ struct TeleopArDrone
 			pitch = 0;
 		}
 		twist.angular.z = yaw;
-		twist.linear.z = pitch;
+		twist.linear.x = -.5*pitch;
 		// ROS_INFO("\nRoll = %f\nPitch = %f\nYaw = %f\n----------", scale*roll, scale*pitch, scale*yaw);
+	}
+
+	void myoIMUCb(const sensor_msgs::Imu::ConstPtr& myo) {
+		double takeoff_cutoff = 45.0;
+		tf::Quaternion q(myo->orientation.x, myo->orientation.y, myo->orientation.z, myo->orientation.w);
+		geometry_msgs::Vector3 v;
+		tf::Matrix3x3(q).getRPY(v.x, v.y, v.z);
+		v.x *= 180.0/M_PI;
+		v.y *= 180.0/M_PI;
+		v.z *= 180.0/M_PI;
+		myo_imu_pub.publish(v);
+
+		dead_man_pressed = v.y < takeoff_cutoff;
+		if (!is_flying && dead_man_pressed){
+			ROS_INFO("L1 was pressed, Taking off!");
+			pub_takeoff.publish(std_msgs::Empty());
+			is_flying = true;
+		}
+		if (is_flying && !dead_man_pressed){
+			ROS_INFO("L1 was released, landing");
+			pub_land.publish(std_msgs::Empty());
+			is_flying = false;
+		}
+		if (abs(v.y) < 10.0) {
+			v.y = 0.0;
+		}
+		twist.linear.z = -v.y * M_PI/180;
+	}
+
+	void myoEMGCb(const ros_myo::EmgArray::ConstPtr& myo) {
+		double K = 0.003;
+		double aveRight = (myo->data[0]+myo->data[1]+myo->data[2]+myo->data[3])/4.0;
+		double aveLeft = (myo->data[4]+myo->data[5]+myo->data[6]+myo->data[7])/4.0;
+		double ave = (aveLeft + aveRight) / 2.0;
+
+		// if (ave > 700.0) {
+		// 	twist.linear.x = 1;
+		// }
+		if (aveLeft > (aveRight + 200.0)) {
+			twist.linear.y = K*ave;
+		}
+		else if (aveRight > (aveLeft + 200.0)) {
+			twist.linear.y = -K*ave;
+		}
+		else {
+			twist.linear.y = 0;
+		}
 	}
 
 	// AUTOPILOT
 	void posCb(const tum_ardrone::filter_stateConstPtr est) {
+		// if (est->droneState == 0) { // emergency state
+		// 	pub_toggle_state.publish(std_msgs::Empty());
+		// 	takeoff();
+		// }
+		if (!auto_pilot_on) {
+			return;
+		}
+
 		if (!nav_queue.empty()) {
 			if (!waypoint_set) {
 				setWayPoint(nav_queue.front());
 				waypoint_set = true;
 			}
 			if (pos_eq(est,nav_queue.front())) {
+				ROS_INFO("Hit Target (%.2f,%.2f,%.2f,%.2f)",nav_queue.front()->x,nav_queue.front()->y,nav_queue.front()->z,nav_queue.front()->yaw);
 				nav_queue.pop();
+				ros::Duration(1.0).sleep();
 				waypoint_set = false;
 			}
 		}
 		else {
+			system("rosservice call /ardrone/setflightanimation 17 0");
+			ros::Duration(1.0).sleep();
 			land();
 			ros::shutdown();
 		}
@@ -225,20 +294,41 @@ struct TeleopArDrone
 		got_first_joy_msg = false;
 		oculusCalib = false;
 
-		joy_sub = nh_.subscribe("/joy", 1,&TeleopArDrone::joyCb, this);
-		oculus_sub = nh_.subscribe("oculus/orientation", 1, &TeleopArDrone::oculusCallback, this);
+		// // joy_sub = nh_.subscribe("/joy", 1,&TeleopArDrone::joyCb, this);
+		// oculus_sub = nh_.subscribe("oculus/orientation", 1, &TeleopArDrone::oculusCallback, this);
+		// myo_imu_sub = nh_.subscribe("/myo_imu", 1, &TeleopArDrone::myoIMUCb, this);
+		// myo_emg_sub = nh_.subscribe("/myo_emg", 1, &TeleopArDrone::myoEMGCb, this);
 		toggle_pressed_in_last_msg = cam_toggle_pressed_in_last_msg = false;
 
+		myo_imu_pub = nh_.advertise<geometry_msgs::Vector3>("/myo_imu/RPY", 1);
 		pub_takeoff       = nh_.advertise<std_msgs::Empty>("/ardrone/takeoff",1);
 		pub_land          = nh_.advertise<std_msgs::Empty>("/ardrone/land",1);
 		pub_toggle_state  = nh_.advertise<std_msgs::Empty>("/ardrone/reset",1);
 		pub_vel           = nh_.advertise<geometry_msgs::Twist>("/cmd_vel",1);
 		srv_cl_cam        = nh_.serviceClient<std_srvs::Empty>("/ardrone/togglecam",1);
 
+		// tum_ardrone::filter_state p;
+		// p.x = -0.25,p.y = 0.25, p.z = 1.5, p.yaw = 0.0;
+		// tum_ardrone::filter_stateConstPtr p_(new tum_ardrone::filter_state(p));
+		// nav_queue.push(p_);
+		// p.x = 0.25,p.y = -0.25, p.z = 1.5, p.yaw = 0.0;
+		// tum_ardrone::filter_stateConstPtr p2_(new tum_ardrone::filter_state(p));
+		// nav_queue.push(p2_);
+		// p.x = -0.25,p.y = -0.25, p.z = 1.5, p.yaw = 0.0;
+		// tum_ardrone::filter_stateConstPtr p3_(new tum_ardrone::filter_state(p));
+		// nav_queue.push(p3_);
+		// p.x = 0.25,p.y = 0.25, p.z = 1.5, p.yaw = 0.0;
+		// tum_ardrone::filter_stateConstPtr p4_(new tum_ardrone::filter_state(p));
+		// nav_queue.push(p4_);
+		// p.x = 0.0,p.y = 0.0, p.z = 0.25, p.yaw = 0.0;
+		// tum_ardrone::filter_stateConstPtr p5_(new tum_ardrone::filter_state(p));
+		// nav_queue.push(p5_);
+
 
 		// autopilot
-		pos_sub = nh_.subscribe("/ardrone/predictedPose", 1, &TeleopArDrone::posCb, this);
+		// pos_sub = nh_.subscribe("/ardrone/predictedPose", 1, &TeleopArDrone::posCb, this);
 		pub_pos			  = nh_.advertise<std_msgs::String>("/tum_ardrone/com",1);
+		auto_pilot_on = false;
 		// srv_cl_anim		  = nh_.serviceClient<ardrone_autonomy::FlightAnim>("/ardrone/setflightanimation",1);
 	}
 
@@ -255,8 +345,18 @@ struct TeleopArDrone
 	  	std_msgs::String str;
 	  	str.data = "c start";
 	  	pub_pos.publish(str);
-		str.data = "u l Autopilot: Start Controlling";
+		// str.data = "u l Autopilot: Start Controlling";
+		str.data = "c autoInit 500 800 4000 0.5";
 		pub_pos.publish(str);
+		// auto_pilot_on = true;
+  	}
+  	void endAutoPilot() {
+  		std_msgs::String str;
+	  	str.data = "c start";
+	  	pub_pos.publish(str);
+		str.data = "u l Autopilot: Stop Controlling";
+		pub_pos.publish(str);
+		auto_pilot_on = false;
   	}
 
 
@@ -272,10 +372,19 @@ int main(int argc, char **argv)
   ROS_INFO("Press and hold L2 for takeoff");
   ROS_INFO("Press 'select' to choose camera");
 
+  // system("rosrun ros_myo myo-rawNode.py");
+
   TeleopArDrone teleop;
   ros::Rate pub_rate(PUBLISH_FREQ);
 
-  teleop.startAutoPilot();
+  // teleop.startAutoPilot();
+  ros::Duration(5.0).sleep();
+  // teleop.takeoff();
+  // // ros::Duration(1.5).sleep();
+  // teleop.startAutoPilot();
+  // ros::Duration(5.0).sleep();
+  // teleop.land();
+  // teleop.endAutoPilot();
 
   while (teleop.nh_.ok())
   {
@@ -283,6 +392,7 @@ int main(int argc, char **argv)
     teleop.send_cmd_vel();
     pub_rate.sleep();
   }
+  teleop.land();
 
   return 0;
 }
