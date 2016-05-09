@@ -6,7 +6,7 @@
 * 
 * Author: David Morra
 */
-
+#include <iostream>
 
 #include "ros/ros.h"
 #include "sensor_msgs/Joy.h"
@@ -136,7 +136,7 @@ struct TeleopArDrone
 
 		if (is_flying && !dead_man_pressed){
 			ROS_INFO("L1 was released, landing");
-			pub_land.publish(std_msgs::Empty());
+			land();
 			is_flying = false;
 		}
 
@@ -166,6 +166,7 @@ struct TeleopArDrone
 	}
 
 	void oculusCallback(const geometry_msgs::Quaternion::ConstPtr& oculus) {
+		if (auto_pilot_on) {return;}
 		double scale = 1.0;
 		double deadzone = 0.25;
 		tf::Quaternion q(oculus->x, oculus->y, oculus->z, oculus->w);
@@ -196,6 +197,7 @@ struct TeleopArDrone
 	}
 
 	void myoIMUCb(const sensor_msgs::Imu::ConstPtr& myo) {
+		if (auto_pilot_on) {return;}
 		double takeoff_cutoff = 45.0;
 		tf::Quaternion q(myo->orientation.x, myo->orientation.y, myo->orientation.z, myo->orientation.w);
 		geometry_msgs::Vector3 v;
@@ -213,7 +215,7 @@ struct TeleopArDrone
 		}
 		if (is_flying && !dead_man_pressed){
 			ROS_INFO("L1 was released, landing");
-			pub_land.publish(std_msgs::Empty());
+			land();
 			is_flying = false;
 		}
 		if (abs(v.y) < 10.0) {
@@ -223,6 +225,7 @@ struct TeleopArDrone
 	}
 
 	void myoEMGCb(const ros_myo::EmgArray::ConstPtr& myo) {
+		if (auto_pilot_on) {return;}
 		double K = 0.003;
 		double aveRight = (myo->data[0]+myo->data[1]+myo->data[2]+myo->data[3])/4.0;
 		double aveLeft = (myo->data[4]+myo->data[5]+myo->data[6]+myo->data[7])/4.0;
@@ -248,28 +251,38 @@ struct TeleopArDrone
 		// 	pub_toggle_state.publish(std_msgs::Empty());
 		// 	takeoff();
 		// }
+		//ROS_INFO("Drone State = %d", est->droneState);
+		if (est->droneState == 2) {
+			if (auto_pilot_on) {
+				ROS_INFO("Turning off autopilot");
+				auto_pilot_on = false;
+				std_msgs::String str;
+				str.data = "c stop";
+		  		pub_pos.publish(str);
+		  	}
+		} // clear autopilot blocking once landed
 		if (!auto_pilot_on) {
 			return;
 		}
 
-		if (!nav_queue.empty()) {
-			if (!waypoint_set) {
-				setWayPoint(nav_queue.front());
-				waypoint_set = true;
-			}
-			if (pos_eq(est,nav_queue.front())) {
-				ROS_INFO("Hit Target (%.2f,%.2f,%.2f,%.2f)",nav_queue.front()->x,nav_queue.front()->y,nav_queue.front()->z,nav_queue.front()->yaw);
-				nav_queue.pop();
-				ros::Duration(1.0).sleep();
-				waypoint_set = false;
-			}
-		}
-		else {
-			system("rosservice call /ardrone/setflightanimation 17 0");
-			ros::Duration(1.0).sleep();
-			land();
-			ros::shutdown();
-		}
+		// if (!nav_queue.empty()) {
+		// 	if (!waypoint_set) {
+		// 		setWayPoint(nav_queue.front());
+		// 		waypoint_set = true;
+		// 	}
+		// 	if (pos_eq(est,nav_queue.front())) {
+		// 		ROS_INFO("Hit Target (%.2f,%.2f,%.2f,%.2f)",nav_queue.front()->x,nav_queue.front()->y,nav_queue.front()->z,nav_queue.front()->yaw);
+		// 		nav_queue.pop();
+		// 		ros::Duration(1.0).sleep();
+		// 		waypoint_set = false;
+		// 	}
+		// }
+		// else {
+		// 	system("rosservice call /ardrone/setflightanimation 17 0");
+		// 	ros::Duration(1.0).sleep();
+		// 	land();
+		// 	ros::shutdown();
+		// }
 	}
 	void setWayPoint(tum_ardrone::filter_stateConstPtr p) {
 		std::ostringstream ss;
@@ -294,10 +307,10 @@ struct TeleopArDrone
 		got_first_joy_msg = false;
 		oculusCalib = false;
 
-		// // joy_sub = nh_.subscribe("/joy", 1,&TeleopArDrone::joyCb, this);
-		// oculus_sub = nh_.subscribe("oculus/orientation", 1, &TeleopArDrone::oculusCallback, this);
-		// myo_imu_sub = nh_.subscribe("/myo_imu", 1, &TeleopArDrone::myoIMUCb, this);
-		// myo_emg_sub = nh_.subscribe("/myo_emg", 1, &TeleopArDrone::myoEMGCb, this);
+		// joy_sub = nh_.subscribe("/joy", 1,&TeleopArDrone::joyCb, this);
+		oculus_sub = nh_.subscribe("oculus/orientation", 1, &TeleopArDrone::oculusCallback, this);
+		myo_imu_sub = nh_.subscribe("/myo_imu", 1, &TeleopArDrone::myoIMUCb, this);
+		myo_emg_sub = nh_.subscribe("/myo_emg", 1, &TeleopArDrone::myoEMGCb, this);
 		toggle_pressed_in_last_msg = cam_toggle_pressed_in_last_msg = false;
 
 		myo_imu_pub = nh_.advertise<geometry_msgs::Vector3>("/myo_imu/RPY", 1);
@@ -326,20 +339,22 @@ struct TeleopArDrone
 
 
 		// autopilot
-		// pos_sub = nh_.subscribe("/ardrone/predictedPose", 1, &TeleopArDrone::posCb, this);
+		pos_sub = nh_.subscribe("/ardrone/predictedPose", 1, &TeleopArDrone::posCb, this);
 		pub_pos			  = nh_.advertise<std_msgs::String>("/tum_ardrone/com",1);
 		auto_pilot_on = false;
 		// srv_cl_anim		  = nh_.serviceClient<ardrone_autonomy::FlightAnim>("/ardrone/setflightanimation",1);
 	}
 
 	void send_cmd_vel(){
+		if (auto_pilot_on) {return;}
     	pub_vel.publish(twist);
   	}
   	void takeoff() {
   		pub_takeoff.publish(std_msgs::Empty());
   	}
   	void land() {
-  		pub_land.publish(std_msgs::Empty());
+  		// pub_land.publish(std_msgs::Empty());
+  		autopilotLand();
   	}
   	void startAutoPilot() {
 	  	std_msgs::String str;
@@ -352,11 +367,66 @@ struct TeleopArDrone
   	}
   	void endAutoPilot() {
   		std_msgs::String str;
-	  	str.data = "c start";
+	  	str.data = "c stop";
 	  	pub_pos.publish(str);
 		str.data = "u l Autopilot: Stop Controlling";
 		pub_pos.publish(str);
 		auto_pilot_on = false;
+  	}
+  	void setAutopilotInitialPose() {
+  		auto_pilot_on = true;
+  		std_msgs::String str;
+
+  		str.data = "c clearCommands";
+	  	pub_pos.publish(str);
+
+	  	str.data = "c setReference $POSE$";
+	  	pub_pos.publish(str);
+
+	  	str.data = "c setInitialReachDist 0.2";
+	  	pub_pos.publish(str);
+
+	  	str.data = "c setStayWithinDist 0.3";
+	  	pub_pos.publish(str);
+
+	  	// str.data = "c start";
+	  	// pub_pos.publish(str);
+
+	  	// str.data = "c stop";
+	  	// pub_pos.publish(str);
+	  	ROS_INFO("Set Initial Pose");
+	  	auto_pilot_on = false;
+  	}
+
+  	void autopilotLand() {
+  		auto_pilot_on = true;
+  		ROS_INFO("Landing Using Autopilot");
+	  	std_msgs::String str;
+
+	  	str.data = "c goto 0 0 0.5 0";
+	  	pub_pos.publish(str);
+
+	  	ROS_INFO("%s",str.data.c_str());
+
+	  	str.data = "c land";
+	  	pub_pos.publish(str);
+
+	  	ROS_INFO("%s",str.data.c_str());
+
+	  	str.data = "c start";
+	  	pub_pos.publish(str);
+
+	  	ROS_INFO("%s",str.data.c_str());
+
+	  	// str.data = "c stop";
+	  	// pub_pos.publish(str);
+
+	  	// str.data = "u l Autopilot: Start Controlling";
+	  	// pub_pos.publish(str);
+	  	// std_msgs::String str;
+	  	// str.data = "u l New Target: xyz = 0.000, 0.000, 0.500,  yaw=0.000";
+	  	// pub_pos.publish(str);;S
+	  //	auto_pilot_on = false;
   	}
 
 
@@ -373,18 +443,23 @@ int main(int argc, char **argv)
   ROS_INFO("Press 'select' to choose camera");
 
   // system("rosrun ros_myo myo-rawNode.py");
-
   TeleopArDrone teleop;
   ros::Rate pub_rate(PUBLISH_FREQ);
 
   // teleop.startAutoPilot();
-  ros::Duration(5.0).sleep();
+  // ros::Duration(5.0).sleep();
   // teleop.takeoff();
   // // ros::Duration(1.5).sleep();
   // teleop.startAutoPilot();
   // ros::Duration(5.0).sleep();
   // teleop.land();
   // teleop.endAutoPilot();
+
+  cout << "Hit Enter after Calibration: " << endl;
+  char c;
+  cin >> c;
+  ROS_INFO("GOT CALIBRATION");
+  teleop.setAutopilotInitialPose();
 
   while (teleop.nh_.ok())
   {
