@@ -69,6 +69,8 @@ struct TeleopArDrone
 	bool cam_toggle_pressed;
 	bool anim_toggle_pressed;
 
+	bool executing_flip;
+
 	std_srvs::Empty srv_empty;
 	ardrone_autonomy::FlightAnim srv_flight;
 
@@ -191,9 +193,25 @@ struct TeleopArDrone
 		if (abs(pitch) < deadzone) {
 			pitch = 0;
 		}
+		if (abs(roll) < deadzone) {
+			roll = 0;
+			executing_flip = false;
+		}
+		if (!executing_flip) {
+			if (roll > 0.7) {
+				// flip right
+				system("rosservice call /ardrone/setflightanimation 19 0");
+				executing_flip = true;
+			}
+			if (roll < -0.7) {
+				// flip left
+				system("rosservice call /ardrone/setflightanimation 18 0");
+				executing_flip = true;
+			}
+		}
 		twist.angular.z = yaw;
 		twist.linear.x = -.5*pitch;
-		// ROS_INFO("\nRoll = %f\nPitch = %f\nYaw = %f\n----------", scale*roll, scale*pitch, scale*yaw);
+		// ROS_INFO("Oculus Roll = %f", roll);
 	}
 
 	void myoIMUCb(const sensor_msgs::Imu::ConstPtr& myo) {
@@ -306,6 +324,7 @@ struct TeleopArDrone
 		is_flying = false;
 		got_first_joy_msg = false;
 		oculusCalib = false;
+		executing_flip = false;
 
 		// joy_sub = nh_.subscribe("/joy", 1,&TeleopArDrone::joyCb, this);
 		oculus_sub = nh_.subscribe("oculus/orientation", 1, &TeleopArDrone::oculusCallback, this);
@@ -383,10 +402,13 @@ struct TeleopArDrone
 	  	str.data = "c setReference $POSE$";
 	  	pub_pos.publish(str);
 
-	  	str.data = "c setInitialReachDist 0.2";
+	  	str.data = "c setInitialReachDist 0.4";
 	  	pub_pos.publish(str);
 
-	  	str.data = "c setStayWithinDist 0.3";
+	  	str.data = "c setStayWithinDist 0.5";
+	  	pub_pos.publish(str);
+
+	  	str.data = "c setStayTime 0.1";
 	  	pub_pos.publish(str);
 
 	  	// str.data = "c start";
