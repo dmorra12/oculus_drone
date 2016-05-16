@@ -78,95 +78,6 @@ struct TeleopArDrone
 	geometry_msgs::Twist twist;
 	ros::ServiceClient srv_cl_cam;
 
-	ros::ServiceClient srv_cl_anim;
-
-	void joyCb(const sensor_msgs::JoyConstPtr joy_msg){
-		if (auto_pilot_on) {return;}
-		if (!got_first_joy_msg){
-			ROS_INFO("Found joystick with %zu buttons and %zu axes", joy_msg->buttons.size(), joy_msg->axes.size());
-			
-			if (joy_msg->buttons.size() == 11 || joy_msg->axes.size() == 8) {
-				controller_type = "F310";
-			}
-			else if (joy_msg->buttons.size() == 19 || joy_msg->axes.size() == 27) {
-				controller_type = "PS3";
-			}
-			else {
-				ROS_FATAL("This joystick button map is not recognized");
-			}
-			ROS_INFO("Controller Type: %s", controller_type.c_str());
-			got_first_joy_msg = true;
-		}
-		if (controller_type == "F310") {
-			// mapping from joystick to velocity
-			float scale = 1;
-			twist.linear.x = scale*joy_msg->axes[1];
-			twist.linear.y = scale*joy_msg->axes[0];
-			// twist.linear.z = scale*joy_msg->axes[4];
-			// twist.angular.z = scale*joy_msg->axes[3];
-			// (L1): dead man switch
-			dead_man_pressed = joy_msg->buttons.at(4);
-			// (R1): switch emergeny state 
-			emergency_toggle_pressed = joy_msg->buttons.at(5);
-			// (select): switch camera mode (front/bottom)
-			cam_toggle_pressed = joy_msg->buttons.at(6);
-			// (X button (in PS3 layout)): backflip
-			anim_toggle_pressed = joy_msg->buttons.at(0);
-		}
-		else if (controller_type == "PS3") {
-			// mapping from joystick to velocity
-			float scale = 1;
-			twist.linear.x = scale*joy_msg->axes[1];
-			twist.linear.y = scale*joy_msg->axes[0];
-			// twist.linear.z = scale*joy_msg->axes[3];
-			// twist.angular.z = scale*joy_msg->axes[2];
-			// (L1): dead man switch
-			dead_man_pressed = joy_msg->buttons.at(10);
-			// (R1): switch emergeny state 
-			emergency_toggle_pressed = joy_msg->buttons.at(11);
-			// (select): switch camera mode (front/bottom)
-			cam_toggle_pressed = joy_msg->buttons.at(0);
-			// (X button (in PS3 layout)): backflip
-			anim_toggle_pressed = joy_msg->buttons.at(14);
-		}
-
-		if (!is_flying && dead_man_pressed){
-			ROS_INFO("L1 was pressed, Taking off!");
-			pub_takeoff.publish(std_msgs::Empty());
-			is_flying = true;
-		}
-
-		if (is_flying && !dead_man_pressed){
-			ROS_INFO("L1 was released, landing");
-			land();
-			is_flying = false;
-		}
-
-		// toggle only once!
-		if (!toggle_pressed_in_last_msg && emergency_toggle_pressed){
-			ROS_INFO("Changing emergency status");
-			pub_toggle_state.publish(std_msgs::Empty());
-		}
-		toggle_pressed_in_last_msg = emergency_toggle_pressed;
-
-
-		if (!cam_toggle_pressed_in_last_msg && cam_toggle_pressed){
-			ROS_INFO("Changing Camera");
-			system("rosservice call /ardrone/togglecam");
-			// if (!srv_cl_cam.call(srv_empty))  ROS_INFO("Failed to toggle Camera");
-		}
-		cam_toggle_pressed_in_last_msg = cam_toggle_pressed;
-
-		if (!anim_toggle_pressed_in_last_msg && anim_toggle_pressed){
-			ROS_INFO("Executing Backflip");
-			srv_flight.request.type = 17;
-			srv_flight.request.duration = 0;
-			system("rosservice call /ardrone/setflightanimation 17 0");
-			// if (!srv_cl_anim.call(srv_flight))  ROS_INFO("Failed to send backflip");
-		}
-		anim_toggle_pressed_in_last_msg = anim_toggle_pressed;
-	}
-
 	void oculusCallback(const geometry_msgs::Quaternion::ConstPtr& oculus) {
 		if (auto_pilot_on) {return;}
 		double scale = 1.0;
@@ -265,11 +176,6 @@ struct TeleopArDrone
 
 	// AUTOPILOT
 	void posCb(const tum_ardrone::filter_stateConstPtr est) {
-		// if (est->droneState == 0) { // emergency state
-		// 	pub_toggle_state.publish(std_msgs::Empty());
-		// 	takeoff();
-		// }
-		//ROS_INFO("Drone State = %d", est->droneState);
 		if (est->droneState == 2) {
 			if (auto_pilot_on) {
 				ROS_INFO("Turning off autopilot");
@@ -282,25 +188,7 @@ struct TeleopArDrone
 		if (!auto_pilot_on) {
 			return;
 		}
-
-		// if (!nav_queue.empty()) {
-		// 	if (!waypoint_set) {
-		// 		setWayPoint(nav_queue.front());
-		// 		waypoint_set = true;
-		// 	}
-		// 	if (pos_eq(est,nav_queue.front())) {
-		// 		ROS_INFO("Hit Target (%.2f,%.2f,%.2f,%.2f)",nav_queue.front()->x,nav_queue.front()->y,nav_queue.front()->z,nav_queue.front()->yaw);
-		// 		nav_queue.pop();
-		// 		ros::Duration(1.0).sleep();
-		// 		waypoint_set = false;
-		// 	}
-		// }
-		// else {
-		// 	system("rosservice call /ardrone/setflightanimation 17 0");
-		// 	ros::Duration(1.0).sleep();
-		// 	land();
-		// 	ros::shutdown();
-		// }
+	
 	}
 	void setWayPoint(tum_ardrone::filter_stateConstPtr p) {
 		std::ostringstream ss;
@@ -309,9 +197,9 @@ struct TeleopArDrone
 		str.data = ss.str();
 		pub_pos.publish(str);
 	}
+
 	bool pos_eq(tum_ardrone::filter_state::ConstPtr p1, tum_ardrone::filter_state::ConstPtr p2) {
 		double dist = sqrt(pow(p1->x - p2->x,2) + pow(p1->y - p2->y,2) + pow(p1->z - p2->z,2) + pow(p1->yaw - p2->yaw,2));
-		// ROS_INFO("***EUCLIDIAN DISTANCE = %f", euclid);
 		return dist < 0.25;
 	}
 
@@ -326,7 +214,6 @@ struct TeleopArDrone
 		oculusCalib = false;
 		executing_flip = false;
 
-		// joy_sub = nh_.subscribe("/joy", 1,&TeleopArDrone::joyCb, this);
 		oculus_sub = nh_.subscribe("oculus/orientation", 1, &TeleopArDrone::oculusCallback, this);
 		myo_imu_sub = nh_.subscribe("/myo_imu", 1, &TeleopArDrone::myoIMUCb, this);
 		myo_emg_sub = nh_.subscribe("/myo_emg", 1, &TeleopArDrone::myoEMGCb, this);
@@ -339,51 +226,33 @@ struct TeleopArDrone
 		pub_vel           = nh_.advertise<geometry_msgs::Twist>("/cmd_vel",1);
 		srv_cl_cam        = nh_.serviceClient<std_srvs::Empty>("/ardrone/togglecam",1);
 
-		// tum_ardrone::filter_state p;
-		// p.x = -0.25,p.y = 0.25, p.z = 1.5, p.yaw = 0.0;
-		// tum_ardrone::filter_stateConstPtr p_(new tum_ardrone::filter_state(p));
-		// nav_queue.push(p_);
-		// p.x = 0.25,p.y = -0.25, p.z = 1.5, p.yaw = 0.0;
-		// tum_ardrone::filter_stateConstPtr p2_(new tum_ardrone::filter_state(p));
-		// nav_queue.push(p2_);
-		// p.x = -0.25,p.y = -0.25, p.z = 1.5, p.yaw = 0.0;
-		// tum_ardrone::filter_stateConstPtr p3_(new tum_ardrone::filter_state(p));
-		// nav_queue.push(p3_);
-		// p.x = 0.25,p.y = 0.25, p.z = 1.5, p.yaw = 0.0;
-		// tum_ardrone::filter_stateConstPtr p4_(new tum_ardrone::filter_state(p));
-		// nav_queue.push(p4_);
-		// p.x = 0.0,p.y = 0.0, p.z = 0.25, p.yaw = 0.0;
-		// tum_ardrone::filter_stateConstPtr p5_(new tum_ardrone::filter_state(p));
-		// nav_queue.push(p5_);
-
-
 		// autopilot
 		pos_sub = nh_.subscribe("/ardrone/predictedPose", 1, &TeleopArDrone::posCb, this);
 		pub_pos			  = nh_.advertise<std_msgs::String>("/tum_ardrone/com",1);
-		auto_pilot_on = false;
-		// srv_cl_anim		  = nh_.serviceClient<ardrone_autonomy::FlightAnim>("/ardrone/setflightanimation",1);
+		auto_pilot_on = false;	
 	}
 
 	void send_cmd_vel(){
 		if (auto_pilot_on) {return;}
     	pub_vel.publish(twist);
   	}
+
   	void takeoff() {
   		pub_takeoff.publish(std_msgs::Empty());
   	}
+
   	void land() {
-  		// pub_land.publish(std_msgs::Empty());
   		autopilotLand();
   	}
+
   	void startAutoPilot() {
 	  	std_msgs::String str;
 	  	str.data = "c start";
 	  	pub_pos.publish(str);
-		// str.data = "u l Autopilot: Start Controlling";
 		str.data = "c autoInit 500 800 4000 0.5";
 		pub_pos.publish(str);
-		// auto_pilot_on = true;
   	}
+
   	void endAutoPilot() {
   		std_msgs::String str;
 	  	str.data = "c stop";
@@ -392,6 +261,7 @@ struct TeleopArDrone
 		pub_pos.publish(str);
 		auto_pilot_on = false;
   	}
+
   	void setAutopilotInitialPose() {
   		auto_pilot_on = true;
   		std_msgs::String str;
@@ -411,11 +281,6 @@ struct TeleopArDrone
 	  	str.data = "c setStayTime 0.1";
 	  	pub_pos.publish(str);
 
-	  	// str.data = "c start";
-	  	// pub_pos.publish(str);
-
-	  	// str.data = "c stop";
-	  	// pub_pos.publish(str);
 	  	ROS_INFO("Set Initial Pose");
 	  	auto_pilot_on = false;
   	}
@@ -439,19 +304,7 @@ struct TeleopArDrone
 	  	pub_pos.publish(str);
 
 	  	ROS_INFO("%s",str.data.c_str());
-
-	  	// str.data = "c stop";
-	  	// pub_pos.publish(str);
-
-	  	// str.data = "u l Autopilot: Start Controlling";
-	  	// pub_pos.publish(str);
-	  	// std_msgs::String str;
-	  	// str.data = "u l New Target: xyz = 0.000, 0.000, 0.500,  yaw=0.000";
-	  	// pub_pos.publish(str);;S
-	  //	auto_pilot_on = false;
   	}
-
-
 };
 
 
@@ -459,25 +312,10 @@ int main(int argc, char **argv)
 {
   ros::init(argc, argv, "ardrone_teleop");
 
-  ROS_INFO("Started ArDrone joystick-Teleop");
-  ROS_INFO("Press L1 to toggle emergency-state");
-  ROS_INFO("Press and hold L2 for takeoff");
-  ROS_INFO("Press 'select' to choose camera");
-
-  // system("rosrun ros_myo myo-rawNode.py");
   TeleopArDrone teleop;
   ros::Rate pub_rate(PUBLISH_FREQ);
 
-  // teleop.startAutoPilot();
-  // ros::Duration(5.0).sleep();
-  // teleop.takeoff();
-  // // ros::Duration(1.5).sleep();
-  // teleop.startAutoPilot();
-  // ros::Duration(5.0).sleep();
-  // teleop.land();
-  // teleop.endAutoPilot();
-
-  cout << "Hit Enter after Calibration: " << endl;
+  cout << "Enter a character to confirm calibration: " << endl;
   char c;
   cin >> c;
   ROS_INFO("GOT CALIBRATION");
