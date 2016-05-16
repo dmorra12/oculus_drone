@@ -6,6 +6,7 @@ Package for operating Parrot AR.Drone 2.0 with Oculus Rift DK1 and Myo Gesture C
 This ROS package was developed for a course at Johns Hopkins University titled "Robot Systems Programming." More information about the course can be found [here](https://dscl.lcsr.jhu.edu/ME530707_2016).
 
 ## Required Prerequisites
+Running the setup script ```package_setup.sh``` should download and install all required components properly, but the required packages are as follows (it is assumed that the destination machine is running Ubuntu 14.04 with ROS Indigo and has an existing catkin workspace "catkin_ws").
 * [OTL/oculus](https://github.com/OTL/oculus)
 * [Oculus SDK for Linux v0.2.5](https://developer.oculus.com/downloads/pc/0.2.5/Oculus_SDK_for_Linux/)
 * [roboTJ101/ros_myo](https://github.com/roboTJ101/ros_myo)
