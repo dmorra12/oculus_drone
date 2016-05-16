@@ -143,7 +143,6 @@ struct TeleopArDrone
 
 		is_flying = false;
 		got_first_joy_msg = false;
-		oculusCalib = false;
 
 		joy_sub = nh_.subscribe("/joy", 1,&TeleopArDrone::joyCb, this);
 		toggle_pressed_in_last_msg = cam_toggle_pressed_in_last_msg = false;
