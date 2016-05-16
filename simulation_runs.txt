@@ -1,9 +1,0 @@
-commands for simulation testing
-
-roslaunch cvg_sim_gazebo ardrone_testworld.launch
-roslaunch ardrone_joystick teleop.launch
-roslaunch oculus_viewer oculus_sample.launch
-rosrun topic_tools relay /ardrone/front/ime_raw/compressed /camera/left/image_raw/compressed
-rosrun topic_tools relay /ardrone/front/ime_raw/compressed /camera/right/image_raw/compressed
-
-Maybe need to relay oculus quaternion topic too?
