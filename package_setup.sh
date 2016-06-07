@@ -28,12 +28,10 @@ make # might return errors but they can likely be ignored
 cd $CATKIN_WS
 catkin_make
 
-
-# # UNCOMMENT to install gazebo simulator package
-# cd $CATKIN_WS/src
-# git clone https://github.com/dougvk/tum_simulator.git
-# cd ..
-# catkin_make
+cd $CATKIN_WS/src
+git clone https://github.com/dougvk/tum_simulator.git
+cd ..
+catkin_make
 
 # Myo
 sudo apt-get install -y ros-indigo-rosserial-server

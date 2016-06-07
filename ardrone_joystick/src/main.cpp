@@ -1,8 +1,7 @@
 /*
-* This ROS package is adapted from Nikolas Engelhard's package used to teleoperate
-* a Parrot AR.Drone using a PS3 controller. This package is modified to use a Logitech
-* Gamepad F310 and can be built with catkin (as opposed to the previous rosbuild system).
-* This package also implements the ability to call preset flight animations for a backflip
+* This ROS package is used to teleoperate a Parrot AR.Drone 2.0 using
+* physical input devices: an Oculus Rift DK1 and a Myo Gesture Control
+* Armband.
 * 
 * Author: David Morra
 */
@@ -20,7 +19,7 @@
 #include <geometry_msgs/Vector3.h>
 #include <ros_myo/EmgArray.h>
 
-
+// oculus
 #include <geometry_msgs/Quaternion.h>
 #include <tf/transform_datatypes.h>
 
@@ -78,26 +77,39 @@ struct TeleopArDrone
 	geometry_msgs::Twist twist;
 	ros::ServiceClient srv_cl_cam;
 
+	/*
+	* Callback function to modify drone command velocity using Quaternion message
+	* broadcast by Oculus headset.
+	*/
 	void oculusCallback(const geometry_msgs::Quaternion::ConstPtr& oculus) {
+		// Quick/dirty solution to block out velocity writing while autopilot is active
 		if (auto_pilot_on) {return;}
 		double scale = 1.0;
 		double deadzone = 0.25;
+
+		// translate Quaternion message to TF quaterion
 		tf::Quaternion q(oculus->x, oculus->y, oculus->z, oculus->w);
 		double roll, pitch, yaw;
-		// tf::Matrix3x3(q).getRPY(roll, pitch, yaw);
-		tf::Matrix3x3(q).getRPY(pitch, yaw, roll); // roll, yaw negative
+
+		// convert quaternion to RPY angle representation
+		tf::Matrix3x3(q).getRPY(pitch, yaw, roll); // roll negative
 		roll = -roll;
+
+		// First time function is called, zero calibration orientation of headset
 		if (!oculusCalib) {
 			OCULUS_ROLL_OFFSET = roll;
 			OCULUS_PITCH_OFFSET = pitch;
 			OCULUS_YAW_OFFSET = yaw;
 			oculusCalib = true;
 		}
+		// shift and scale rotation angles for velocity commands
 		roll -= OCULUS_ROLL_OFFSET;
 		pitch -= OCULUS_PITCH_OFFSET;
 		yaw -= OCULUS_YAW_OFFSET;
 		pitch *= scale;
 		yaw *= scale;
+
+		// implement "deadzone" for easier user interaction
 		if (abs(yaw) < deadzone) {
 			yaw = 0;
 		}
@@ -108,6 +120,8 @@ struct TeleopArDrone
 			roll = 0;
 			executing_flip = false;
 		}
+
+		// ensure flip preset animation is only executed once
 		if (!executing_flip) {
 			if (roll > 0.7) {
 				// flip right
@@ -120,22 +134,32 @@ struct TeleopArDrone
 				executing_flip = true;
 			}
 		}
+		// update command velocities 
 		twist.angular.z = yaw;
 		twist.linear.x = -.5*pitch;
-		// ROS_INFO("Oculus Roll = %f", roll);
 	}
 
+	/*
+	* Callback function to modify drone command velocity using Quaternion message
+	* broadcast by Myo armband.
+	*/
 	void myoIMUCb(const sensor_msgs::Imu::ConstPtr& myo) {
+		// Quick/dirty solution to block out velocity writing while autopilot is active
 		if (auto_pilot_on) {return;}
 		double takeoff_cutoff = 45.0;
+
+		// translate Quaternion message to TF quaterion
 		tf::Quaternion q(myo->orientation.x, myo->orientation.y, myo->orientation.z, myo->orientation.w);
 		geometry_msgs::Vector3 v;
 		tf::Matrix3x3(q).getRPY(v.x, v.y, v.z);
 		v.x *= 180.0/M_PI;
 		v.y *= 180.0/M_PI;
 		v.z *= 180.0/M_PI;
+
+		// rotation degree angles published in message for debugging purposes
 		myo_imu_pub.publish(v);
 
+		// use deadman switch to ensure failsafe behavior of vehicle landing
 		dead_man_pressed = v.y < takeoff_cutoff;
 		if (!is_flying && dead_man_pressed){
 			ROS_INFO("L1 was pressed, Taking off!");
@@ -147,22 +171,28 @@ struct TeleopArDrone
 			land();
 			is_flying = false;
 		}
+		// implement deadzone for easier user operation
 		if (abs(v.y) < 10.0) {
 			v.y = 0.0;
 		}
+
+		// update vertical command velocity
 		twist.linear.z = -v.y * M_PI/180;
 	}
 
+	/*
+	* Callback function to modify drone command velocity using EMG sensor readings
+	* array message broadcast by Myo armband
+	*/
 	void myoEMGCb(const ros_myo::EmgArray::ConstPtr& myo) {
+		// Quick/dirty solution to block out velocity writing while autopilot is active
 		if (auto_pilot_on) {return;}
 		double K = 0.003;
 		double aveRight = (myo->data[0]+myo->data[1]+myo->data[2]+myo->data[3])/4.0;
 		double aveLeft = (myo->data[4]+myo->data[5]+myo->data[6]+myo->data[7])/4.0;
 		double ave = (aveLeft + aveRight) / 2.0;
 
-		// if (ave > 700.0) {
-		// 	twist.linear.x = 1;
-		// }
+		// Translate left and right horizonatally if wrist motion is sufficiently large
 		if (aveLeft > (aveRight + 200.0)) {
 			twist.linear.y = K*ave;
 		}
@@ -174,8 +204,12 @@ struct TeleopArDrone
 		}
 	}
 
-	// AUTOPILOT
+	/*
+	* Callback function to handle autopilot activation/blocking and deactivation
+	* based on drone state message broadcast by the tum_ardrone package
+	*/
 	void posCb(const tum_ardrone::filter_stateConstPtr est) {
+		// if the drone is in the landed state, ensure autopilot does not block other functions
 		if (est->droneState == 2) {
 			if (auto_pilot_on) {
 				ROS_INFO("Turning off autopilot");
@@ -190,19 +224,6 @@ struct TeleopArDrone
 		}
 	
 	}
-	void setWayPoint(tum_ardrone::filter_stateConstPtr p) {
-		std::ostringstream ss;
-		ss << "c goto " << p->x << " " << p->y << " " << p->z << " " << p->yaw;
-		std_msgs::String str;
-		str.data = ss.str();
-		pub_pos.publish(str);
-	}
-
-	bool pos_eq(tum_ardrone::filter_state::ConstPtr p1, tum_ardrone::filter_state::ConstPtr p2) {
-		double dist = sqrt(pow(p1->x - p2->x,2) + pow(p1->y - p2->y,2) + pow(p1->z - p2->z,2) + pow(p1->yaw - p2->yaw,2));
-		return dist < 0.25;
-	}
-
 
 	TeleopArDrone(){
 
@@ -232,6 +253,7 @@ struct TeleopArDrone
 		auto_pilot_on = false;	
 	}
 
+	// function to broadcast updated command velocity
 	void send_cmd_vel(){
 		if (auto_pilot_on) {return;}
     	pub_vel.publish(twist);
@@ -244,6 +266,11 @@ struct TeleopArDrone
   	void land() {
   		autopilotLand();
   	}
+
+  	/************************************************************************************
+  	* The following functions are implemented based on reverse engineering the internal
+  	* communication protocol utilized by the tum_ardrone navigation and control package. 
+	*************************************************************************************/
 
   	void startAutoPilot() {
 	  	std_msgs::String str;
@@ -315,6 +342,7 @@ int main(int argc, char **argv)
   TeleopArDrone teleop;
   ros::Rate pub_rate(PUBLISH_FREQ);
 
+  // Wait for the user to perform manual PTAM calibration step
   cout << "Enter a character to confirm calibration: " << endl;
   char c;
   cin >> c;
